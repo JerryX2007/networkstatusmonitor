@@ -13,6 +13,13 @@ class Monitor(BaseModel):
 
 
 monitors = []
+check_history = []
+
+def find_monitor(monitor_id: int):
+    for monitor in monitors:
+        if monitor["id"] == monitor_id:
+            return monitor
+    return None
 
 @app.post("/monitors")
 def add_monitor(monitor: Monitor):
@@ -21,7 +28,11 @@ def add_monitor(monitor: Monitor):
         "name": monitor.name,
         "target": monitor.target,
         "port": monitor.port,
-        "timeout": monitor.timeout
+        "timeout": monitor.timeout,
+        "status": None,
+        "latency": None,
+        "last_checked": None,
+        "last_error": None
     }
     monitors.append(new_monitor)
     return new_monitor
@@ -32,63 +43,70 @@ def get_monitors():
 
 @app.get("/monitors/{monitor_id}")
 def read_monitor(monitor_id: int):
-    for monitor in monitors:
-        if monitor["id"] == monitor_id:
-            return monitor
-    return {"error": "Monitor not found"}
-
-@app.delete("/monitors/{monitor_id}")
-def delete_monitor(monitor_id: int):
-    for monitor in monitors:
-        if monitor["id"] == monitor_id:
-            monitors.remove(monitor)
-            return {"message": "Monitor deleted"}
-    return {"error": "Monitor not found"}
-
-@app.put("/monitors/{monitor_id}")
-def update_monitor(monitor_id: int, monitor: Monitor):
-    for m in monitors:
-        if m["id"] == monitor_id:
-            m["name"] = monitor.name
-            m["target"] = monitor.target
-            m["port"] = monitor.port
-            m["timeout"] = monitor.timeout
-            return m
+    monitor = find_monitor(monitor_id)
+    if monitor:
+        return monitor
     return {"error": "Monitor not found"}
 
 @app.get("/monitors/{monitor_id}/check")
 def check_monitor(monitor_id: int):
-    for monitor in monitors:
-        if monitor["id"] == monitor_id:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(monitor["timeout"])
-            start_time = time.perf_counter()
-            try:
-                sock.connect((monitor["target"], monitor["port"]))
-                end_time = time.perf_counter()
-                latency = (end_time - start_time) * 1000
-                latency = round(latency, 2)
-                return {"status": "online", "latency": latency}
-            except socket.timeout:
-                return {"status": "offline", "error": "Connection timed out"}
-            except socket.error as e:
-                return {"status": "offline", "error": str(e)}
-            finally:
-                sock.close()
-    return {"error": "Monitor not found"}
+    monitor = find_monitor(monitor_id)
+    if not monitor:
+        return {"error": "Monitor not found"}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(monitor["timeout"])
+    start_time = time.perf_counter()
+    try:
+        sock.connect((monitor["target"], monitor["port"]))
+        end_time = time.perf_counter()
+        latency = (end_time - start_time) * 1000
+        latency = round(latency, 2)
+        monitor["status"] = "online"
+        monitor["latency"] = latency
+        monitor["last_error"] = None
+    except socket.timeout:
+        monitor["status"] = "offline"
+        monitor["latency"] = None
+        monitor["last_error"] = "Connection timed out"
+    except socket.error as e:
+        monitor["status"] = "offline"
+        monitor["latency"] = None
+        monitor["last_error"] = str(e)
+    finally:
+        monitor["last_checked"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        check_history.append({
+            "monitor_id": monitor_id,
+            "status": monitor["status"],
+            "latency": monitor["latency"],
+            "checked_at": monitor["last_checked"],
+            "last_error": monitor["last_error"]
+        })
+        sock.close()
+    return check_history[-1]
 
+@app.get("/monitors/{monitor_id}/history")
+def get_monitor_history(monitor_id: int):
+    history = []
+    for check in check_history:
+        if check["monitor_id"] == monitor_id:
+            history.append(check)
+    return history
 
-"""
-@app.get("/")
-def home():
-    return {"message": "Hello, World!"}
-
-
-@app.get("/monitors/{monitor_id}")
-def read_monitor(monitor_id: int, q: str | None = None):
-    return {"monitor_id": monitor_id, "q": q}
+@app.delete("/monitors/{monitor_id}")
+def delete_monitor(monitor_id: int):
+    monitor = find_monitor(monitor_id)
+    if not monitor:
+        return {"error": "Monitor not found"}
+    monitors.remove(monitor)
+    return {"message": "Monitor deleted"}
 
 @app.put("/monitors/{monitor_id}")
 def update_monitor(monitor_id: int, monitor: Monitor):
-    return {"monitor_name": monitor.name, "target": monitor.target, "port": monitor.port}
-"""
+    m = find_monitor(monitor_id)
+    if not m:
+        return {"error": "Monitor not found"}
+    m["name"] = monitor.name
+    m["target"] = monitor.target
+    m["port"] = monitor.port
+    m["timeout"] = monitor.timeout
+    return m
