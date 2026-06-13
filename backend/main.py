@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import sqlite3
 import socket
@@ -44,47 +44,54 @@ def init_db():
 
 init_db()
 
-monitors = []
-check_history = []
-
 def find_monitor(monitor_id: int):
-    for monitor in monitors:
-        if monitor["id"] == monitor_id:
-            return monitor
+    conn = get_db()
+    cursor = conn.execute("SELECT * FROM monitors WHERE id = ?", (monitor_id,))
+    monitor = cursor.fetchone()
+    conn.close()
+    if monitor:
+        return dict(monitor)
     return None
+
 
 @app.post("/monitors")
 def add_monitor(monitor: Monitor):
-    new_monitor = {
-        "id": len(monitors) + 1,
-        "name": monitor.name,
-        "target": monitor.target,
-        "port": monitor.port,
-        "timeout": monitor.timeout,
-        "status": None,
-        "latency": None,
-        "last_checked": None,
-        "last_error": None
-    }
-    monitors.append(new_monitor)
-    return new_monitor
+    conn = get_db()
+    cursor = conn.execute(
+        """
+        INSERT INTO monitors
+        (name, target, port, timeout, status, latency, last_checked, last_error)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (monitor.name, monitor.target, monitor.port, monitor.timeout, None, None, None, None)
+    )
+    conn.commit()
+    monitor_id = cursor.lastrowid
+
+    row = conn.execute("SELECT * FROM monitors WHERE id = ?", (monitor_id,)).fetchone()
+    conn.close()
+    return dict(row)
 
 @app.get("/monitors")
 def get_monitors():
-    return monitors
+    conn = get_db()
+    cursor = conn.execute("SELECT * FROM monitors")
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 @app.get("/monitors/{monitor_id}")
 def read_monitor(monitor_id: int):
     monitor = find_monitor(monitor_id)
     if monitor:
         return monitor
-    return {"error": "Monitor not found"}
+    raise HTTPException(status_code=404, detail="Monitor not found")
 
-@app.get("/monitors/{monitor_id}/check")
-def check_monitor(monitor_id: int):
+@app.post("/monitors/{monitor_id}/check")
+def check_monitor(monitor_id: int): 
     monitor = find_monitor(monitor_id)
     if not monitor:
-        return {"error": "Monitor not found"}
+        raise HTTPException(status_code=404, detail="Monitor not found")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(monitor["timeout"])
     start_time = time.perf_counter()
@@ -106,39 +113,67 @@ def check_monitor(monitor_id: int):
         monitor["last_error"] = str(e)
     finally:
         monitor["last_checked"] = time.strftime("%Y-%m-%d %H:%M:%S")
-        check_history.append({
-            "monitor_id": monitor_id,
-            "status": monitor["status"],
-            "latency": monitor["latency"],
-            "checked_at": monitor["last_checked"],
-            "last_error": monitor["last_error"]
-        })
+        conn = get_db()
+        conn.execute(
+            """
+            UPDATE monitors
+            SET status = ?, latency = ?, last_checked = ?, last_error = ?
+            WHERE id = ?
+            """,
+            (monitor["status"], monitor["latency"], monitor["last_checked"], monitor["last_error"], monitor_id)
+        )
+        cursor = conn.execute(
+            """
+            INSERT INTO check_history
+            (monitor_id, status, latency, checked_at, last_error)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (monitor_id, monitor["status"], monitor["latency"], monitor["last_checked"], monitor["last_error"])
+        )
+        conn.commit()
+        recent = cursor.lastrowid
+        row = conn.execute("SELECT * FROM check_history WHERE id = ?", (recent,)).fetchone()
+        conn.close()
         sock.close()
-    return check_history[-1]
+    return dict(row)
 
 @app.get("/monitors/{monitor_id}/history")
 def get_monitor_history(monitor_id: int):
-    history = []
-    for check in check_history:
-        if check["monitor_id"] == monitor_id:
-            history.append(check)
-    return history
+    monitor = find_monitor(monitor_id)
+    if not monitor:
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    conn = get_db()
+    cursor = conn.execute("SELECT * FROM check_history WHERE monitor_id = ?", (monitor_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 @app.delete("/monitors/{monitor_id}")
 def delete_monitor(monitor_id: int):
     monitor = find_monitor(monitor_id)
     if not monitor:
-        return {"error": "Monitor not found"}
-    monitors.remove(monitor)
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    conn = get_db()
+    conn.execute("DELETE FROM monitors WHERE id = ?", (monitor_id,))
+    conn.commit()
+    conn.close()
     return {"message": "Monitor deleted"}
 
 @app.put("/monitors/{monitor_id}")
 def update_monitor(monitor_id: int, monitor: Monitor):
     m = find_monitor(monitor_id)
     if not m:
-        return {"error": "Monitor not found"}
-    m["name"] = monitor.name
-    m["target"] = monitor.target
-    m["port"] = monitor.port
-    m["timeout"] = monitor.timeout
-    return m
+        raise HTTPException(status_code=404, detail="Monitor not found")
+    conn = get_db()
+    conn.execute(
+        """
+        UPDATE monitors
+        SET name = ?, target = ?, port = ?, timeout = ?
+        WHERE id = ?
+        """,
+        (monitor.name, monitor.target, monitor.port, monitor.timeout, monitor_id)
+    )
+    row = conn.execute("SELECT * FROM monitors WHERE id = ?", (monitor_id,)).fetchone()
+    conn.commit()
+    conn.close()
+    return dict(row)
