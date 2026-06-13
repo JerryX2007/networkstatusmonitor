@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
+import sqlite3
 import socket
 import time
 
@@ -11,6 +12,37 @@ class Monitor(BaseModel):
     port: int = 80
     timeout: float = 3.0
 
+DATABASE = "monitor.db"
+
+def get_db():
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db():
+    conn = get_db()
+    conn.execute('''CREATE TABLE IF NOT EXISTS monitors (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 name TEXT,
+                 target TEXT,
+                 port INTEGER,
+                 timeout REAL,
+                 status TEXT,
+                 latency REAL,
+                 last_checked TEXT,
+                 last_error TEXT)''')
+    conn.execute('''CREATE TABLE IF NOT EXISTS check_history (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 monitor_id INTEGER,
+                 status TEXT,
+                 latency REAL,
+                 checked_at TEXT,
+                 last_error TEXT,
+                 FOREIGN KEY(monitor_id) REFERENCES monitors(id))''')
+    conn.commit()
+    conn.close()
+
+init_db()
 
 monitors = []
 check_history = []
