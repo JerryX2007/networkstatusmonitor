@@ -2,19 +2,19 @@ Network Status Monitor
 
 A full-stack network monitoring application that allows users to track the availability, latency, uptime, check history, and outage incidents of websites, IP addresses, and services.
 
-The project is built with a FastAPI backend, SQLite database, and a React + TypeScript frontend.
+The project uses a FastAPI backend, SQLite database, and React + TypeScript frontend.
 
 Features
-Create, read, update, and delete network monitors
-Check whether a target and port are online or offline
-Measure latency in milliseconds
-Store check history in SQLite
-Calculate uptime statistics
-Track outage incidents automatically
-View ongoing and resolved incidents
-Input validation for monitor fields
-REST API with FastAPI documentation
-Tech Stack
+- Create, read, update, and delete network monitors
+- Check whether a target and port are online or offline
+- Measure latency in milliseconds
+- Store check history in SQLite
+- Calculate uptime statistics
+- Track outage incidents automatically
+- View ongoing and resolved incidents
+- Validate monitor input fields
+- Explore API routes through FastAPI documentation
+Tech Stack:
 Backend
 Python
 FastAPI
@@ -118,7 +118,7 @@ The database includes three main tables:
 
 monitors
 
-Stores the monitor configuration and latest status.
+Stores monitor configuration and the latest status.
 
 check_history
 
