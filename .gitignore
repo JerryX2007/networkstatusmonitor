@@ -1,5 +1,6 @@
 .venv/
 __pycache__/
+.vscode/
 *.pyc
 .DS_Store
 monitor.db
